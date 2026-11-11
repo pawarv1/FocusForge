@@ -8,7 +8,7 @@ import requests
 from app.config import settings
 from app.security import setup_security_middleware
 from app.database import Base, engine, get_db
-from app.models import TaskModel, PriorityEnum, FocusSessionModel, SessionModeEnum
+from app.models import TaskModel, PriorityEnum, FocusSessionModel, SessionModeEnum, TaskCategoryEnum
 from app.schemas import (
     TaskCreate,
     TaskResponse,
@@ -103,7 +103,8 @@ def log_focus_session(session_in: FocusSessionCreate, db: Session = Depends(get_
         task_id=session_in.task_id,
         duration_minutes=session_in.duration_minutes,
         mode=session_in.mode,
-        completed_at=datetime.now().date()
+        notes=session_in.notes,
+        completed_at=datetime.now()
     )
     db.add(new_session)
     db.commit()
@@ -229,9 +230,11 @@ def get_journal_entries(db: Session = Depends(get_db)):
     result = []
     for s in sessions:
         task_title = s.task.title if s.task else None
+        task_category = s.task.category.value if (s.task and s.task.category) else None
         result.append({
             "id": s.id,
             "task_title": task_title,
+            "task_category": task_category,
             "duration_minutes": s.duration_minutes,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
             "notes": s.notes
@@ -244,8 +247,8 @@ def get_journal_entries(db: Session = Depends(get_db)):
 # -------------------------------------------------------------------
 
 @app.get("/api/tasks", response_model=list[TaskResponse])
-def get_tasks(db: Session = Depends(get_db)):
-    """Fetch active tasks sorted by due_date (soonest first, nulls last) and priority (HIGH -> MEDIUM -> LOW)."""
+def get_tasks(category: TaskCategoryEnum | None = None, db: Session = Depends(get_db)):
+    """Fetch active tasks, optionally filtered by category."""
     priority_order = case(
         {
             PriorityEnum.HIGH: 1,
@@ -255,15 +258,15 @@ def get_tasks(db: Session = Depends(get_db)):
         value=TaskModel.priority,
     )
 
-    return (
-        db.query(TaskModel)
-        .filter(TaskModel.is_archived == False)
-        .order_by(
-            TaskModel.due_date.asc().nullslast(),
-            priority_order.asc()
-        )
-        .all()
-    )
+    query = db.query(TaskModel).filter(TaskModel.is_archived == False)
+
+    if category is not None:
+        query = query.filter(TaskModel.category == category)
+
+    return query.order_by(
+        TaskModel.due_date.asc().nullslast(),
+        priority_order.asc()
+    ).all()
 
 @app.get("/api/tasks/archived", response_model=list[TaskResponse])
 def get_archived_tasks(db: Session = Depends(get_db)):
@@ -276,6 +279,7 @@ def create_task(task_in: TaskCreate, db: Session = Depends(get_db)):
     new_task = TaskModel(
         title=task_in.title.strip(),
         description=task_in.description.strip() if task_in.description else None,
+        category=task_in.category or TaskCategoryEnum.DEVELOPMENT,
         priority=task_in.priority or PriorityEnum.MEDIUM,
         due_date=task_in.due_date,
     )
@@ -326,6 +330,9 @@ def update_task(task_id: int, task_in: TaskUpdate, db: Session = Depends(get_db)
 
     if task_in.description is not None:
         task.description = task_in.description.strip() if task_in.description else None
+
+    if task_in.category is not None:
+        task.category = task_in.category
 
     if "due_date" in task_in.model_fields_set:
         task.due_date = task_in.due_date

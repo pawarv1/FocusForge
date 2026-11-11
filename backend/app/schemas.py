@@ -1,12 +1,16 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
-from app.models import PriorityEnum, SessionModeEnum
+from app.models import PriorityEnum, SessionModeEnum, TaskCategoryEnum
 
-# --- Task Schemas ---
+# -------------------------------------------------------------------
+# Task Schemas
+# -------------------------------------------------------------------
+
 class TaskBase(BaseModel):
     title: str
     description: Optional[str] = None
+    category: TaskCategoryEnum = TaskCategoryEnum.DEVELOPMENT
     priority: PriorityEnum = PriorityEnum.MEDIUM
     previous_priority: Optional[PriorityEnum] = None
     due_date: Optional[datetime] = None
@@ -17,15 +21,15 @@ class TaskBase(BaseModel):
 class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = None
+    category: TaskCategoryEnum = TaskCategoryEnum.DEVELOPMENT
     priority: Optional[PriorityEnum] = PriorityEnum.MEDIUM
-    category: Optional[str] = "DEVELOPMENT"
     due_date: Optional[datetime] = None
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[TaskCategoryEnum] = None
     priority: Optional[PriorityEnum] = None
-    category: Optional[str] = None
     due_date: Optional[datetime] = None
     is_completed: Optional[bool] = None
     is_top3: Optional[bool] = None
@@ -33,20 +37,14 @@ class TaskUpdate(BaseModel):
 
 class TaskResponse(TaskBase):
     id: int
-    title: str
-    description: Optional[str]
-    priority: str
-    category: str
-    is_top3: bool
-    is_completed: bool
-    is_archived: bool
-    due_date: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- Focus Session Schemas ---
+# -------------------------------------------------------------------
+# Focus Session Schemas
+# -------------------------------------------------------------------
+
 class FocusSessionCreate(BaseModel):
     task_id: Optional[int] = None
     duration_minutes: int
@@ -58,12 +56,15 @@ class FocusSessionResponse(BaseModel):
     task_id: Optional[int] = None
     duration_minutes: int
     mode: SessionModeEnum
+    notes: Optional[str] = None
     completed_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- Analytics Schemas ---
+# -------------------------------------------------------------------
+# Analytics Schemas
+# -------------------------------------------------------------------
+
 class DailyAnalyticsResponse(BaseModel):
     total_focus_minutes: int
     completed_work_sessions: int

@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -28,14 +28,14 @@ class TaskModel(Base):
     description = Column(String, nullable=True)
     priority = Column(SQLEnum(PriorityEnum), default=PriorityEnum.MEDIUM, nullable=False)
     previous_priority = Column(SQLEnum(PriorityEnum), nullable=True)
-    category = Column(SQLEnum(TaskCategoryEnum), default=TaskCategoryEnum.DEVELOPMENT)
+    category = Column(SQLEnum(TaskCategoryEnum), default=TaskCategoryEnum.DEVELOPMENT, nullable=False)
     due_date = Column(DateTime, nullable=True)
-    is_completed = Column(Boolean, default=False)
-    is_top3 = Column(Boolean, default=False)
-    is_archived = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.now)
+    is_completed = Column(Boolean, default=False, nullable=False)
+    is_top3 = Column(Boolean, default=False, nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    sessions = relationship("FocusSessionModel", back_populates="task", cascade="all, delete-orphan")
+    sessions = relationship("FocusSessionModel", back_populates="task")
 
 class FocusSessionModel(Base):
     __tablename__ = "focus_sessions"
@@ -44,7 +44,7 @@ class FocusSessionModel(Base):
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     duration_minutes = Column(Integer, nullable=False)
     mode = Column(SQLEnum(SessionModeEnum), default=SessionModeEnum.WORK, nullable=False)
-    completed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     notes = Column(Text, nullable=True)
 
     task = relationship("TaskModel", back_populates="sessions")
