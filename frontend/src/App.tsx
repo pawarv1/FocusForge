@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from './api/client';
 import { Navbar, type NavTab } from './components/Navbar';
 import { TaskListView } from './components/TaskListView';
+import { CalendarView } from './components/CalendarView';
 import { RemindersView } from './components/RemindersView';
 import { JournalView } from './components/JournalView';
 import { AnalyticsView } from './components/AnalyticsView';
@@ -71,6 +72,7 @@ export const App: React.FC = () => {
       {/* Main Container */}
       <main className="max-w-4xl mx-auto p-6">
         {activeTab === 'tasks' && <TaskListView />}
+        {activeTab === 'calendar' && <CalendarView />}
         {activeTab === 'reminders' && (
           <RemindersView
             tasks={tasks}

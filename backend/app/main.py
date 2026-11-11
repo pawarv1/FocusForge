@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import case, func
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
+from icalendar import Calendar
+import requests
 
 from app.config import settings
 from app.security import setup_security_middleware
@@ -26,6 +28,63 @@ app = FastAPI(
 )
 
 setup_security_middleware(app)
+
+# -------------------------------------------------------------------
+# Google Calendar iCal Endpoint
+# -------------------------------------------------------------------
+
+@app.get("/api/calendar/today")
+def get_today_calendar_events():
+    """Fetch and parse live events for today from the secret Google Calendar iCal feed."""
+    ical_url = settings.GOOGLE_CALENDAR_ICAL_URL
+    if not ical_url:
+        return []
+
+    try:
+        response = requests.get(ical_url, timeout=5)
+        response.raise_for_status()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch Google Calendar feed: {str(e)}"
+        )
+
+    cal = Calendar.from_ical(response.content)
+    today = date.today()
+    events = []
+
+    for component in cal.walk('VEVENT'):
+        dtstart = component.get('dtstart').dt
+        dtend = component.get('dtend').dt
+        summary = str(component.get('summary', 'Untitled Event'))
+
+        # Standardize datetime / date types
+        if isinstance(dtstart, datetime):
+            event_date = dtstart.date()
+            start_hour = dtstart.hour + (dtstart.minute / 60.0)
+            end_hour = dtend.hour + (dtend.minute / 60.0) if isinstance(dtend, datetime) else start_hour + 1.0
+            start_str = dtstart.strftime("%I:%M %p")
+            end_str = dtend.strftime("%I:%M %p") if isinstance(dtend, datetime) else ""
+        else:
+            event_date = dtstart
+            start_hour = 9.0
+            end_hour = 10.0
+            start_str = "All Day"
+            end_str = ""
+
+        if event_date == today:
+            duration = max(end_hour - start_hour, 0.5)
+            events.append({
+                "id": str(component.get('uid', len(events))),
+                "title": summary,
+                "startTime": start_str,
+                "endTime": end_str,
+                "startHour": start_hour,
+                "durationHours": duration,
+                "category": "CLASS" if "lecture" in summary.lower() else "MEETING" if "sync" in summary.lower() or "meeting" in summary.lower() else "DEADLINE"
+            })
+
+    return events
 
 # -------------------------------------------------------------------
 # Focus Session & Telemetry Endpoints

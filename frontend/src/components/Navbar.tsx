@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type NavTab = 'tasks' | 'reminders' | 'journal' | 'analytics';
+export type NavTab = 'tasks' | 'calendar' | 'reminders' | 'journal' | 'analytics';
 
 interface NavbarProps {
   activeTab: NavTab;
@@ -42,6 +42,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             📋 Workspace
+          </button>
+          <button
+            onClick={() => onTabChange('calendar')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeTab === 'calendar'
+                ? 'bg-amber-400 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            📅 Calendar
           </button>
           <button
             onClick={() => onTabChange('reminders')}

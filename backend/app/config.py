@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     DATABASE_URL: str = "sqlite:///./focusforge.db"
+
+    GOOGLE_CALENDAR_ICAL_URL: str = ""
     
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
