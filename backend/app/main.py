@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import case, func
 from datetime import datetime, time, timedelta, date
 from icalendar import Calendar
+import recurring_ical_events
 import requests
 
 from app.config import settings
@@ -19,6 +20,7 @@ from app.schemas import (
     WeeklyAnalyticsResponse,
     DailyFocusItem
 )
+from app.calendar_categories import parse_calendar_event
 
 Base.metadata.create_all(bind=engine)
 
@@ -35,7 +37,7 @@ setup_security_middleware(app)
 
 @app.get("/api/calendar/today")
 def get_today_calendar_events():
-    """Fetch and parse live events for today from the secret Google Calendar iCal feed."""
+    """Fetch and parse live events (including recurring series) for today from Google Calendar."""
     ical_url = settings.GOOGLE_CALENDAR_ICAL_URL
     if not ical_url:
         return []
@@ -50,40 +52,64 @@ def get_today_calendar_events():
         )
 
     cal = Calendar.from_ical(response.content)
-    today = date.today()
+
+    # Local day boundaries (timezone-aware) for expanding recurring series
+    local_now = datetime.now().astimezone()
+    today = local_now.date()
+    day_start = datetime.combine(today, time.min, tzinfo=local_now.tzinfo)
+    day_end = datetime.combine(today, time.max, tzinfo=local_now.tzinfo)
+
+    todays_components = recurring_ical_events.of(cal).between(day_start, day_end)
     events = []
 
-    for component in cal.walk('VEVENT'):
-        dtstart = component.get('dtstart').dt
-        dtend = component.get('dtend').dt
-        summary = str(component.get('summary', 'Untitled Event'))
+    for idx, component in enumerate(todays_components):
+        dtstart_prop = component.get("dtstart")
+        if not dtstart_prop:
+            continue
 
-        # Standardize datetime / date types
+        dtstart = dtstart_prop.dt
+        dtend_prop = component.get("dtend")
+        dtend = dtend_prop.dt if dtend_prop else None
+
+        raw_summary = str(component.get("summary", "Untitled Event"))
+        clean_title, event_category = parse_calendar_event(component, raw_summary)
+
         if isinstance(dtstart, datetime):
-            event_date = dtstart.date()
+            if dtstart.tzinfo is not None:
+                dtstart = dtstart.astimezone()
+            if isinstance(dtend, datetime) and dtend.tzinfo is not None:
+                dtend = dtend.astimezone()
+
             start_hour = dtstart.hour + (dtstart.minute / 60.0)
-            end_hour = dtend.hour + (dtend.minute / 60.0) if isinstance(dtend, datetime) else start_hour + 1.0
+            end_hour = (
+                dtend.hour + (dtend.minute / 60.0)
+                if isinstance(dtend, datetime)
+                else start_hour + 1.0
+            )
             start_str = dtstart.strftime("%I:%M %p")
             end_str = dtend.strftime("%I:%M %p") if isinstance(dtend, datetime) else ""
         else:
-            event_date = dtstart
+            # All-day event (date object)
             start_hour = 9.0
             end_hour = 10.0
             start_str = "All Day"
             end_str = ""
 
-        if event_date == today:
-            duration = max(end_hour - start_hour, 0.5)
-            events.append({
-                "id": str(component.get('uid', len(events))),
-                "title": summary,
-                "startTime": start_str,
-                "endTime": end_str,
-                "startHour": start_hour,
-                "durationHours": duration,
-                "category": "CLASS" if "lecture" in summary.lower() else "MEETING" if "sync" in summary.lower() or "meeting" in summary.lower() else "DEADLINE"
-            })
+        duration = max(end_hour - start_hour, 0.5)
+        base_uid = str(component.get("uid", f"evt-{idx}"))
 
+        events.append({
+            "id": f"{base_uid}-{today.isoformat()}-{idx}",
+            "title": clean_title,
+            "startTime": start_str,
+            "endTime": end_str,
+            "startHour": start_hour,
+            "durationHours": duration,
+            "category": event_category,
+        })
+
+    # Sort chronologically by startHour
+    events.sort(key=lambda e: e["startHour"])
     return events
 
 # -------------------------------------------------------------------
