@@ -15,6 +15,7 @@ from app.schemas import (
     TaskResponse,
     TaskUpdate,
     FocusSessionCreate,
+    FocusSessionUpdate,
     FocusSessionResponse,
     DailyAnalyticsResponse,
     WeeklyAnalyticsResponse,
@@ -267,6 +268,22 @@ def get_journal_entries(db: Session = Depends(get_db)):
         })
 
     return result
+
+@app.patch("/api/sessions/{session_id}", response_model=FocusSessionResponse)
+def update_focus_session(session_id: int, session_in: FocusSessionUpdate, db: Session = Depends(get_db),):
+    """Update reflection notes on an existing focus session."""
+    db_session = (
+        db.query(FocusSessionModel)
+        .filter(FocusSessionModel.id == session_id)
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(status_code=404, detail="Focus session not found")
+
+    db_session.notes = session_in.notes.strip() if session_in.notes else None
+    db.commit()
+    db.refresh(db_session)
+    return db_session
 
 # -------------------------------------------------------------------
 # Static & Collection Routes

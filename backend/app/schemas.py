@@ -51,6 +51,9 @@ class FocusSessionCreate(BaseModel):
     mode: SessionModeEnum = SessionModeEnum.WORK
     notes: Optional[str] = None
 
+class FocusSessionUpdate(BaseModel):
+    notes: str | None = None
+
 class FocusSessionResponse(BaseModel):
     id: int
     task_id: Optional[int] = None
