@@ -4,47 +4,77 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, E
 from sqlalchemy.orm import relationship
 from app.database import Base
 
+
 class PriorityEnum(str, enum.Enum):
+    UNASSIGNED = "UNASSIGNED"
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
 
 class SessionModeEnum(str, enum.Enum):
     WORK = "WORK"
     BREAK = "BREAK"
 
-class TaskCategoryEnum(str, enum.Enum):
-    COURSEWORK = "COURSEWORK"
-    RESEARCH = "RESEARCH"
-    DEVELOPMENT = "DEVELOPMENT"
-    CAREER = "CAREER"
-    OTHER = "OTHER"
 
-class TaskModel(Base):
-    __tablename__ = "tasks"
+class TaskEnrichmentModel(Base):
+    __tablename__ = "task_enrichments"
+
+    google_task_id = Column(String, primary_key=True, index=True)
+    google_list_id = Column(String, nullable=False, index=True)
+
+    priority = Column(SQLEnum(PriorityEnum), default=PriorityEnum.UNASSIGNED, nullable=False)
+    previous_priority = Column(SQLEnum(PriorityEnum), nullable=True)
+    is_top3 = Column(Boolean, default=False, nullable=False)
+
+    estimated_minutes = Column(Integer, nullable=True)
+    assigned_block_start = Column(DateTime(timezone=True), nullable=True)
+
+    steps = relationship(
+        "MicroStepModel",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="MicroStepModel.position",
+    )
+    sessions = relationship("FocusSessionModel", back_populates="task")
+
+
+class MicroStepModel(Base):
+    __tablename__ = "micro_steps"
 
     id = Column(Integer, primary_key=True, index=True)
+    google_task_id = Column(
+        String,
+        ForeignKey("task_enrichments.google_task_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     title = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    priority = Column(SQLEnum(PriorityEnum), default=PriorityEnum.MEDIUM, nullable=False)
-    previous_priority = Column(SQLEnum(PriorityEnum), nullable=True)
-    category = Column(SQLEnum(TaskCategoryEnum), default=TaskCategoryEnum.DEVELOPMENT, nullable=False)
-    due_date = Column(DateTime, nullable=True)
-    is_completed = Column(Boolean, default=False, nullable=False)
-    is_top3 = Column(Boolean, default=False, nullable=False)
-    is_archived = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_done = Column(Boolean, default=False, nullable=False)
+    position = Column(Integer, default=0, nullable=False)
 
-    sessions = relationship("FocusSessionModel", back_populates="task")
+    task = relationship("TaskEnrichmentModel", back_populates="steps")
+
 
 class FocusSessionModel(Base):
     __tablename__ = "focus_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    google_task_id = Column(
+        String,
+        ForeignKey("task_enrichments.google_task_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    task_title = Column(String, nullable=True)
+    category_name = Column(String, nullable=True)
+
     duration_minutes = Column(Integer, nullable=False)
     mode = Column(SQLEnum(SessionModeEnum), default=SessionModeEnum.WORK, nullable=False)
-    completed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     notes = Column(Text, nullable=True)
 
-    task = relationship("TaskModel", back_populates="sessions")
+    task = relationship("TaskEnrichmentModel", back_populates="sessions")
