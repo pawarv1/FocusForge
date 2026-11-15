@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type NavTab = 'tasks' | 'calendar' | 'reminders' | 'journal' | 'analytics';
+export type NavTab = 'tasks' | 'reminders' | 'journal' | 'analytics';
 
 interface NavbarProps {
   activeTab: NavTab;
@@ -44,16 +44,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             📋 Workspace
           </button>
           <button
-            onClick={() => onTabChange('calendar')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeTab === 'calendar'
-                ? 'bg-amber-400 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            📅 Calendar
-          </button>
-          <button
             onClick={() => onTabChange('reminders')}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
               activeTab === 'reminders'
@@ -90,7 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="bg-slate-950/80 border-t border-slate-800/60 py-1 px-6">
         <div className="max-w-4xl mx-auto flex items-center justify-end gap-4 text-[10px] text-slate-400 font-mono">
           <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Space</kbd> Start/Pause Timer</span>
-          <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Cmd/Ctrl+Enter</kbd> Add/Save</span>
+          <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Cmd/Ctrl+Enter</kbd> Save Step / Note</span>
           <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Esc</kbd> Close Drawer</span>
         </div>
       </div>

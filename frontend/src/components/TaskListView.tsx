@@ -1,35 +1,42 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api } from '../api/client';
-import { TaskInput } from './TaskInput';
 import { PomodoroTimer, type PomodoroTimerRef } from './PomodoroTimer';
-import { ArchiveModal } from './ArchiveModal';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import type { Task, Priority, Category } from '../types/task';
+import type { Task, Priority, MicroStep } from '../types/task';
+
+const DYNAMIC_BADGE_PALETTE = [
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-amber-100 text-amber-800 border-amber-200',
+  'bg-rose-100 text-rose-700 border-rose-200',
+  'bg-cyan-100 text-cyan-800 border-cyan-200',
+];
 
 export const TaskListView: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [isArchiveOpen, setIsArchiveOpen] = useState<boolean>(false);
 
   // Focus tracking state
-  const [activeFocusTaskId, setActiveFocusTaskId] = useState<number | null>(null);
+  const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | null>(null);
 
-  // Category filter state
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<Category | 'ALL'>('ALL');
+  // Category filter state (derived from Google Task Lists)
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
 
   // Refs
   const timerRef = useRef<PomodoroTimerRef>(null);
 
-  // Inline editing state
-  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
-  const [editTitle, setEditTitle] = useState<string>('');
-  const [editDescription, setEditDescription] = useState<string>('');
-  const [editPriority, setEditPriority] = useState<Priority>('MEDIUM');
-  const [editCategory, setEditCategory] = useState<Category>('DEVELOPMENT');
-  const [editDueDate, setEditDueDate] = useState<string>('');
+  // Execution metadata editing state (Priority & Est. Minutes)
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editPriority, setEditPriority] = useState<Priority>('UNASSIGNED');
+  const [editEstimatedMinutes, setEditEstimatedMinutes] = useState<string>('');
 
-  // Global Keyboard Shortcuts
+  // Micro-step input state per task
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [newStepTitle, setNewStepTitle] = useState<string>('');
+
   useKeyboardShortcuts({
     onToggleTimer: () => {
       if (timerRef.current) {
@@ -41,66 +48,40 @@ export const TaskListView: React.FC = () => {
       if (submitBtn) submitBtn.click();
     },
     onEscape: () => {
-      if (isArchiveOpen) {
-        setIsArchiveOpen(false);
-      }
+      setEditingTaskId(null);
+      setExpandedTaskId(null);
     },
   });
 
-  // Fetch initial tasks
+  const fetchTasks = async (showSpinner = true) => {
+    try {
+      if (showSpinner) setIsLoading(true);
+      else setIsSyncing(true);
+      setError(null);
+      const response = await api.get<Task[]>('/tasks');
+      setTasks(response.data);
+    } catch (err) {
+      console.error('Error fetching tasks:', err);
+      setError('Could not load tasks. Is the backend server running?');
+    } finally {
+      setIsLoading(false);
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchTasks = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const response = await api.get<Task[]>('/tasks');
-        setTasks(response.data);
-      } catch (err) {
-        console.error('Error fetching tasks:', err);
-        setError('Could not load tasks. Is the backend server running?');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchTasks();
+    fetchTasks(true);
   }, []);
 
-  const activeFocusTask = tasks.find((t) => t.id === activeFocusTaskId) || null;
+  const activeFocusTask = tasks.find((t) => t.google_task_id === activeFocusTaskId) || null;
 
-  // 1. Add Task
-  const handleAddTask = async (taskData: {
-    title: string;
-    description: string | null;
-    priority: Priority;
-    category: Category;
-    due_date: string | null;
-  }) => {
-    try {
-      setError(null);
-      const response = await api.post<Task>('/tasks', taskData);
-      setTasks((prev) => [...prev, response.data]);
-    } catch (err) {
-      console.error('Error creating task:', err);
-      setError('Failed to create task.');
-      throw err;
-    }
-  };
+  // Dynamic categories sourced from Google Task Lists
+  const availableCategories = useMemo(() => {
+    const unique = Array.from(new Set(tasks.map((t) => t.category).filter(Boolean)));
+    return ['ALL', ...unique];
+  }, [tasks]);
 
-  // 2. Delete Task
-  const handleDeleteTask = async (id: number) => {
-    try {
-      await api.delete(`/tasks/${id}`);
-      setTasks((prev) => prev.filter((t) => t.id !== id));
-      if (activeFocusTaskId === id) {
-        setActiveFocusTaskId(null);
-      }
-    } catch (err) {
-      console.error('Error deleting task:', err);
-      setError('Failed to delete task.');
-    }
-  };
-
-  // 3. Toggle Top 3 Status
+  // 1. Toggle Top 3 Status
   const handleToggleTop3 = async (task: Task) => {
     const currentTop3Count = tasks.filter((t) => t.is_top3).length;
 
@@ -111,10 +92,29 @@ export const TaskListView: React.FC = () => {
 
     try {
       setError(null);
-      const response = await api.patch<Task>(`/tasks/${task.id}/top3`);
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? response.data : t)));
+      const response = await api.patch<{
+        google_task_id: string;
+        priority: Priority;
+        previous_priority: Priority | null;
+        is_top3: boolean;
+      }>(`/tasks/${task.google_task_id}/top3`, null, {
+        params: { google_list_id: task.google_list_id },
+      });
 
-      if (task.is_top3 && activeFocusTaskId === task.id) {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.google_task_id === task.google_task_id
+            ? {
+                ...t,
+                priority: response.data.priority,
+                previous_priority: response.data.previous_priority,
+                is_top3: response.data.is_top3,
+              }
+            : t
+        )
+      );
+
+      if (task.is_top3 && activeFocusTaskId === task.google_task_id) {
         setActiveFocusTaskId(null);
       }
     } catch (err: any) {
@@ -124,74 +124,132 @@ export const TaskListView: React.FC = () => {
     }
   };
 
-  // 4. Toggle Completion
-  const handleToggleComplete = async (id: number) => {
+  // 2. Complete Task in Google Tasks
+  const handleToggleComplete = async (googleTaskId: string) => {
+    const target = tasks.find((t) => t.google_task_id === googleTaskId);
     try {
-      const response = await api.patch<Task>(`/tasks/${id}/complete`);
-      setTasks((prev) => prev.map((t) => (t.id === id ? response.data : t)));
+      setError(null);
+      await api.patch(`/tasks/${googleTaskId}/complete`, null, {
+        params: { google_list_id: target?.google_list_id || '@default' },
+      });
+      setTasks((prev) => prev.filter((t) => t.google_task_id !== googleTaskId));
 
-      if (activeFocusTaskId === id) {
+      if (activeFocusTaskId === googleTaskId) {
         setActiveFocusTaskId(null);
       }
     } catch (err) {
-      console.error('Error toggling completion:', err);
-      setError('Failed to update completion status.');
+      console.error('Error completing task:', err);
+      setError('Failed to mark task complete.');
     }
   };
 
-  // 5. Inline Edit Controls
+  // 3. Edit Execution Metadata (Priority & Estimated Minutes)
   const startEditing = (task: Task) => {
-    setEditingTaskId(task.id);
-    setEditTitle(task.title);
-    setEditDescription(task.description || '');
+    setEditingTaskId(task.google_task_id);
     setEditPriority(task.priority);
-    setEditCategory(task.category);
-    setEditDueDate(
-      task.due_date ? new Date(task.due_date).toISOString().slice(0, 16) : ''
-    );
+    setEditEstimatedMinutes(task.estimated_minutes ? String(task.estimated_minutes) : '');
   };
 
-  const handleSaveEdit = async (id: number) => {
+  const handleSaveEdit = async (task: Task) => {
     try {
       setError(null);
-      const response = await api.patch<Task>(`/tasks/${id}`, {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
+      const parsedMinutes = editEstimatedMinutes.trim()
+        ? parseInt(editEstimatedMinutes, 10)
+        : null;
+
+      await api.patch(`/tasks/${task.google_task_id}`, {
+        google_list_id: task.google_list_id,
         priority: editPriority,
-        category: editCategory,
-        due_date: editDueDate ? new Date(editDueDate).toISOString() : null,
+        estimated_minutes: parsedMinutes && parsedMinutes > 0 ? parsedMinutes : null,
       });
-      setTasks((prev) => prev.map((t) => (t.id === id ? response.data : t)));
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.google_task_id === task.google_task_id
+            ? {
+                ...t,
+                priority: editPriority,
+                estimated_minutes: parsedMinutes && parsedMinutes > 0 ? parsedMinutes : null,
+              }
+            : t
+        )
+      );
       setEditingTaskId(null);
     } catch (err: any) {
-      console.error('Error updating task:', err);
+      console.error('Error updating task metadata:', err);
       const msg = err.response?.data?.detail || 'Failed to update task.';
       setError(msg);
     }
   };
 
-  // 6. Clear Completed
-  const handleClearCompleted = async () => {
+  // 4. Micro-Step Breakdown Handlers
+  const handleAddStep = async (task: Task, e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStepTitle.trim()) return;
+
     try {
-      const response = await api.post<Task[]>('/tasks/clear-completed');
-      setTasks(response.data);
-      if (activeFocusTask?.is_completed) {
-        setActiveFocusTaskId(null);
-      }
+      setError(null);
+      const res = await api.post<MicroStep>(
+        `/tasks/${task.google_task_id}/steps`,
+        {
+          title: newStepTitle.trim(),
+          position: task.steps.length,
+        },
+        { params: { google_list_id: task.google_list_id } }
+      );
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.google_task_id === task.google_task_id
+            ? { ...t, steps: [...t.steps, res.data] }
+            : t
+        )
+      );
+      setNewStepTitle('');
     } catch (err) {
-      console.error('Error clearing completed tasks:', err);
-      setError('Failed to clear completed tasks.');
+      console.error('Error adding micro-step:', err);
+      setError('Failed to add step.');
     }
   };
 
-  const handleTaskRestored = (restoredTask: Task) => {
-    setTasks((prev) => [...prev, restoredTask]);
+  const handleToggleStep = async (googleTaskId: string, step: MicroStep) => {
+    try {
+      const res = await api.patch<MicroStep>(`/steps/${step.id}`, {
+        is_done: !step.is_done,
+      });
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.google_task_id === googleTaskId
+            ? {
+                ...t,
+                steps: t.steps.map((s) => (s.id === step.id ? res.data : s)),
+              }
+            : t
+        )
+      );
+    } catch (err) {
+      console.error('Error toggling step:', err);
+    }
+  };
+
+  const handleDeleteStep = async (googleTaskId: string, stepId: number) => {
+    try {
+      await api.delete(`/steps/${stepId}`);
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.google_task_id === googleTaskId
+            ? { ...t, steps: t.steps.filter((s) => s.id !== stepId) }
+            : t
+        )
+      );
+    } catch (err) {
+      console.error('Error deleting step:', err);
+    }
   };
 
   const top3Tasks = tasks.filter((t) => t.is_top3);
   const inboxTasks = tasks.filter((t) => !t.is_top3);
 
-  // Filter inbox tasks by category pill
   const filteredInboxTasks = inboxTasks.filter((task) => {
     if (selectedCategoryFilter === 'ALL') return true;
     return task.category === selectedCategoryFilter;
@@ -205,11 +263,15 @@ export const TaskListView: React.FC = () => {
         return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'LOW':
         return 'bg-gray-100 text-gray-600 border-gray-200';
+      case 'UNASSIGNED':
+      default:
+        return 'bg-amber-50 text-amber-700 border-dashed border-amber-300';
     }
   };
 
-  const getCategoryBadge = (c: Category) => {
-    switch (c) {
+  const getCategoryBadge = (categoryName: string) => {
+    const normalized = categoryName.trim().toUpperCase();
+    switch (normalized) {
       case 'RESEARCH':
         return 'bg-purple-100 text-purple-700 border-purple-200';
       case 'COURSEWORK':
@@ -218,8 +280,13 @@ export const TaskListView: React.FC = () => {
         return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'CAREER':
         return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'OTHER':
-        return 'bg-gray-100 text-gray-700 border-gray-200';
+      default: {
+        let hash = 0;
+        for (let i = 0; i < normalized.length; i++) {
+          hash = normalized.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        return DYNAMIC_BADGE_PALETTE[Math.abs(hash) % DYNAMIC_BADGE_PALETTE.length];
+      }
     }
   };
 
@@ -229,8 +296,6 @@ export const TaskListView: React.FC = () => {
     return date.toLocaleString([], {
       month: 'short',
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
     });
   };
 
@@ -243,23 +308,17 @@ export const TaskListView: React.FC = () => {
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Header Controls */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Task Workspace</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setIsArchiveOpen(true)}
-            className="text-xs font-semibold px-3 py-1.5 text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg transition"
-          >
-            📁 View Archive
-          </button>
-          {tasks.some((t) => t.is_completed) && (
-            <button
-              onClick={handleClearCompleted}
-              className="text-xs font-semibold px-3 py-1.5 text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition"
-            >
-              Clear Completed
-            </button>
-          )}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Execution Workspace</h1>
+          <p className="text-xs text-gray-500">Synced with Google Tasks • Prioritized locally</p>
         </div>
+        <button
+          onClick={() => fetchTasks(false)}
+          disabled={isSyncing}
+          className="text-xs font-semibold px-3 py-1.5 text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition shadow-sm disabled:opacity-50"
+        >
+          {isSyncing ? 'Syncing...' : '🔄 Sync Google Tasks'}
+        </button>
       </div>
 
       {/* Error Alert */}
@@ -277,9 +336,6 @@ export const TaskListView: React.FC = () => {
         onCompleteTask={handleToggleComplete}
         onClearActiveTask={() => setActiveFocusTaskId(null)}
       />
-
-      {/* Task Input Form */}
-      <TaskInput onAddTask={handleAddTask} />
 
       {/* Skeleton / Task List */}
       {isLoading ? (
@@ -309,27 +365,32 @@ export const TaskListView: React.FC = () => {
               <ul className="space-y-2">
                 {top3Tasks.map((task) => (
                   <TaskCardItem
-                    key={task.id}
+                    key={task.google_task_id}
                     task={task}
-                    isFocused={activeFocusTaskId === task.id}
-                    onFocusSelect={() => setActiveFocusTaskId(task.id)}
-                    isEditing={editingTaskId === task.id}
-                    editTitle={editTitle}
-                    editDescription={editDescription}
+                    isFocused={activeFocusTaskId === task.google_task_id}
+                    onFocusSelect={() => setActiveFocusTaskId(task.google_task_id)}
+                    isEditing={editingTaskId === task.google_task_id}
                     editPriority={editPriority}
-                    editCategory={editCategory}
-                    editDueDate={editDueDate}
-                    setEditTitle={setEditTitle}
-                    setEditDescription={setEditDescription}
+                    editEstimatedMinutes={editEstimatedMinutes}
                     setEditPriority={setEditPriority}
-                    setEditCategory={setEditCategory}
-                    setEditDueDate={setEditDueDate}
+                    setEditEstimatedMinutes={setEditEstimatedMinutes}
                     startEditing={() => startEditing(task)}
                     cancelEditing={() => setEditingTaskId(null)}
-                    saveEditing={() => handleSaveEdit(task.id)}
-                    onToggleComplete={() => handleToggleComplete(task.id)}
+                    saveEditing={() => handleSaveEdit(task)}
+                    isExpanded={expandedTaskId === task.google_task_id}
+                    onToggleExpand={() => {
+                      setExpandedTaskId(
+                        expandedTaskId === task.google_task_id ? null : task.google_task_id
+                      );
+                      setNewStepTitle('');
+                    }}
+                    newStepTitle={newStepTitle}
+                    setNewStepTitle={setNewStepTitle}
+                    onAddStep={(e) => handleAddStep(task, e)}
+                    onToggleStep={(step) => handleToggleStep(task.google_task_id, step)}
+                    onDeleteStep={(stepId) => handleDeleteStep(task.google_task_id, stepId)}
+                    onToggleComplete={() => handleToggleComplete(task.google_task_id)}
                     onToggleTop3={() => handleToggleTop3(task)}
-                    onDelete={() => handleDeleteTask(task.id)}
                     getPriorityBadge={getPriorityBadge}
                     getCategoryBadge={getCategoryBadge}
                     formatDueDate={formatDueDate}
@@ -343,11 +404,11 @@ export const TaskListView: React.FC = () => {
           {/* INBOX SECTION */}
           <section className="space-y-3">
             <div className="flex items-center justify-between pt-2">
-              <h2 className="text-lg font-bold text-gray-800">Inbox</h2>
+              <h2 className="text-lg font-bold text-gray-800">Google Tasks Inbox</h2>
 
-              {/* Category Filter Pills */}
+              {/* Dynamic Category Filter Pills */}
               <div className="flex gap-1 overflow-x-auto">
-                {(['ALL', 'DEVELOPMENT', 'RESEARCH', 'COURSEWORK', 'CAREER', 'OTHER'] as const).map((cat) => (
+                {availableCategories.map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategoryFilter(cat)}
@@ -366,33 +427,38 @@ export const TaskListView: React.FC = () => {
             {filteredInboxTasks.length === 0 ? (
               <div className="text-center py-6 bg-gray-50 border border-dashed rounded-xl text-gray-400 text-xs">
                 {selectedCategoryFilter === 'ALL'
-                  ? 'Inbox is empty!'
-                  : `No tasks found in ${selectedCategoryFilter} category.`}
+                  ? 'No active tasks in Google Tasks!'
+                  : `No tasks found in ${selectedCategoryFilter}.`}
               </div>
             ) : (
               <ul className="space-y-2">
                 {filteredInboxTasks.map((task) => (
                   <TaskCardItem
-                    key={task.id}
+                    key={task.google_task_id}
                     task={task}
                     isFocused={false}
-                    isEditing={editingTaskId === task.id}
-                    editTitle={editTitle}
-                    editDescription={editDescription}
+                    isEditing={editingTaskId === task.google_task_id}
                     editPriority={editPriority}
-                    editCategory={editCategory}
-                    editDueDate={editDueDate}
-                    setEditTitle={setEditTitle}
-                    setEditDescription={setEditDescription}
+                    editEstimatedMinutes={editEstimatedMinutes}
                     setEditPriority={setEditPriority}
-                    setEditCategory={setEditCategory}
-                    setEditDueDate={setEditDueDate}
+                    setEditEstimatedMinutes={setEditEstimatedMinutes}
                     startEditing={() => startEditing(task)}
                     cancelEditing={() => setEditingTaskId(null)}
-                    saveEditing={() => handleSaveEdit(task.id)}
-                    onToggleComplete={() => handleToggleComplete(task.id)}
+                    saveEditing={() => handleSaveEdit(task)}
+                    isExpanded={expandedTaskId === task.google_task_id}
+                    onToggleExpand={() => {
+                      setExpandedTaskId(
+                        expandedTaskId === task.google_task_id ? null : task.google_task_id
+                      );
+                      setNewStepTitle('');
+                    }}
+                    newStepTitle={newStepTitle}
+                    setNewStepTitle={setNewStepTitle}
+                    onAddStep={(e) => handleAddStep(task, e)}
+                    onToggleStep={(step) => handleToggleStep(task.google_task_id, step)}
+                    onDeleteStep={(stepId) => handleDeleteStep(task.google_task_id, stepId)}
+                    onToggleComplete={() => handleToggleComplete(task.google_task_id)}
                     onToggleTop3={() => handleToggleTop3(task)}
-                    onDelete={() => handleDeleteTask(task.id)}
                     getPriorityBadge={getPriorityBadge}
                     getCategoryBadge={getCategoryBadge}
                     formatDueDate={formatDueDate}
@@ -405,41 +471,33 @@ export const TaskListView: React.FC = () => {
           </section>
         </>
       )}
-
-      {/* Archive Modal */}
-      <ArchiveModal
-        isOpen={isArchiveOpen}
-        onClose={() => setIsArchiveOpen(false)}
-        onTaskRestored={handleTaskRestored}
-      />
     </div>
   );
 };
 
-// Sub-component for Task Card
 interface TaskCardItemProps {
   task: Task;
   isFocused?: boolean;
   onFocusSelect?: () => void;
   isEditing: boolean;
-  editTitle: string;
-  editDescription: string;
   editPriority: Priority;
-  editCategory: Category;
-  editDueDate: string;
-  setEditTitle: (val: string) => void;
-  setEditDescription: (val: string) => void;
+  editEstimatedMinutes: string;
   setEditPriority: (val: Priority) => void;
-  setEditCategory: (val: Category) => void;
-  setEditDueDate: (val: string) => void;
+  setEditEstimatedMinutes: (val: string) => void;
   startEditing: () => void;
   cancelEditing: () => void;
   saveEditing: () => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  newStepTitle: string;
+  setNewStepTitle: (val: string) => void;
+  onAddStep: (e: React.FormEvent) => void;
+  onToggleStep: (step: MicroStep) => void;
+  onDeleteStep: (stepId: number) => void;
   onToggleComplete: () => void;
   onToggleTop3: () => void;
-  onDelete: () => void;
   getPriorityBadge: (p: Priority) => string;
-  getCategoryBadge: (c: Category) => string;
+  getCategoryBadge: (c: string) => string;
   formatDueDate: (d?: string | null) => string | null;
   isTop3Disabled?: boolean;
   isOverdue?: boolean;
@@ -450,100 +508,35 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
   isFocused,
   onFocusSelect,
   isEditing,
-  editTitle,
-  editDescription,
   editPriority,
-  editCategory,
-  editDueDate,
-  setEditTitle,
-  setEditDescription,
+  editEstimatedMinutes,
   setEditPriority,
-  setEditCategory,
-  setEditDueDate,
+  setEditEstimatedMinutes,
   startEditing,
   cancelEditing,
   saveEditing,
+  isExpanded,
+  onToggleExpand,
+  newStepTitle,
+  setNewStepTitle,
+  onAddStep,
+  onToggleStep,
+  onDeleteStep,
   onToggleComplete,
   onToggleTop3,
-  onDelete,
   getPriorityBadge,
   getCategoryBadge,
   formatDueDate,
   isTop3Disabled,
   isOverdue,
 }) => {
-  if (isEditing) {
-    return (
-      <li className="p-3 bg-blue-50 border border-blue-300 rounded-lg space-y-2">
-        <input
-          type="text"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          className="w-full px-3 py-1.5 border rounded bg-white text-sm"
-        />
-        <textarea
-          value={editDescription}
-          onChange={(e) => setEditDescription(e.target.value)}
-          className="w-full px-3 py-1.5 border rounded bg-white text-xs"
-          rows={2}
-        />
-        <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
-          <div className="flex gap-2">
-            <select
-              value={editCategory}
-              onChange={(e) => setEditCategory(e.target.value as Category)}
-              className="text-xs px-2 py-1 border rounded bg-white font-medium"
-            >
-              <option value="DEVELOPMENT">💻 Dev</option>
-              <option value="RESEARCH">🔬 Research</option>
-              <option value="COURSEWORK">📚 Class</option>
-              <option value="CAREER">🎯 Career</option>
-              <option value="OTHER">📌 Other</option>
-            </select>
-            <select
-              value={editPriority}
-              disabled={task.is_top3}
-              onChange={(e) => setEditPriority(e.target.value as Priority)}
-              className="text-xs px-2 py-1 border rounded bg-white"
-            >
-              <option value="LOW">Low Priority</option>
-              <option value="MEDIUM">Medium Priority</option>
-              <option value="HIGH">High Priority</option>
-            </select>
-            <input
-              type="datetime-local"
-              value={editDueDate}
-              onChange={(e) => setEditDueDate(e.target.value)}
-              className="text-xs px-2 py-1 border rounded bg-white"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={saveEditing}
-              className="text-xs font-semibold px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Save
-            </button>
-            <button
-              onClick={cancelEditing}
-              className="text-xs px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </li>
-    );
-  }
-
   const formattedDue = formatDueDate(task.due_date);
+  const completedSteps = task.steps.filter((s) => s.is_done).length;
 
   return (
     <li
       className={`p-3 border rounded-lg transition ${
-        task.is_completed
-          ? 'bg-gray-100 opacity-60 border-gray-200'
-          : isFocused
+        isFocused
           ? 'bg-amber-100/60 border-amber-400 ring-2 ring-amber-400/40 shadow-sm'
           : task.is_top3
           ? 'bg-white border-amber-300 shadow-sm'
@@ -556,17 +549,12 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
             type="checkbox"
             checked={task.is_completed}
             onChange={onToggleComplete}
+            title="Mark complete in Google Tasks"
             className="w-4 h-4 mt-1 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
           />
-          <div className="space-y-1">
+          <div className="space-y-1 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className={`font-semibold ${
-                  task.is_completed ? 'line-through text-gray-400' : 'text-gray-900'
-                }`}
-              >
-                {task.title}
-              </span>
+              <span className="font-semibold text-gray-900">{task.title}</span>
               <span
                 className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getCategoryBadge(
                   task.category
@@ -581,6 +569,11 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
               >
                 {task.priority}
               </span>
+              {task.estimated_minutes && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-200">
+                  ⏱ {task.estimated_minutes}m
+                </span>
+              )}
               {formattedDue && (
                 <span
                   className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
@@ -594,20 +587,52 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
                 </span>
               )}
             </div>
-            {task.description && (
-              <p
-                className={`text-xs ${
-                  task.is_completed ? 'line-through text-gray-400' : 'text-gray-600'
-                }`}
-              >
-                {task.description}
-              </p>
+
+            {task.notes && <p className="text-xs text-gray-600">{task.notes}</p>}
+
+            {/* Inline Execution Metadata Editor */}
+            {isEditing && (
+              <div className="flex items-center gap-2 flex-wrap pt-2">
+                <select
+                  value={editPriority}
+                  disabled={task.is_top3}
+                  onChange={(e) => setEditPriority(e.target.value as Priority)}
+                  className="text-xs px-2 py-1 border rounded bg-white"
+                >
+                  <option value="UNASSIGNED">Unassigned</option>
+                  <option value="LOW">Low Priority</option>
+                  <option value="MEDIUM">Medium Priority</option>
+                  <option value="HIGH">High Priority</option>
+                </select>
+                <input
+                  type="number"
+                  min={5}
+                  step={5}
+                  placeholder="Est. mins"
+                  value={editEstimatedMinutes}
+                  onChange={(e) => setEditEstimatedMinutes(e.target.value)}
+                  className="w-24 text-xs px-2 py-1 border rounded bg-white"
+                />
+                <button
+                  onClick={saveEditing}
+                  className="text-xs font-semibold px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={cancelEditing}
+                  className="text-xs px-2.5 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          {task.is_top3 && !task.is_completed && onFocusSelect && (
+        {/* Action Buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {task.is_top3 && onFocusSelect && (
             <button
               onClick={onFocusSelect}
               className={`text-xs font-semibold px-2 py-1 rounded transition ${
@@ -620,10 +645,16 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
             </button>
           )}
           <button
+            onClick={onToggleExpand}
+            className="text-xs text-slate-600 hover:text-slate-900 px-2 py-1 rounded hover:bg-gray-200 transition"
+          >
+            Steps {task.steps.length > 0 ? `(${completedSteps}/${task.steps.length})` : '+'}
+          </button>
+          <button
             onClick={startEditing}
             className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-200 transition"
           >
-            Edit
+            Triage
           </button>
           <button
             onClick={onToggleTop3}
@@ -638,14 +669,53 @@ const TaskCardItem: React.FC<TaskCardItemProps> = ({
           >
             {task.is_top3 ? 'Unpin' : '⭐ Pin'}
           </button>
-          <button
-            onClick={onDelete}
-            className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50 transition"
-          >
-            Delete
-          </button>
         </div>
       </div>
+
+      {/* Expandable Micro-Steps Breakdown */}
+      {(isExpanded || task.steps.length > 0) && (
+        <div className="mt-2.5 pl-7 pt-2 border-t border-gray-200/80 space-y-1.5">
+          {task.steps.map((step) => (
+            <div key={step.id} className="flex items-center justify-between text-xs group">
+              <label className="flex items-center gap-2 cursor-pointer flex-1">
+                <input
+                  type="checkbox"
+                  checked={step.is_done}
+                  onChange={() => onToggleStep(step)}
+                  className="w-3.5 h-3.5 rounded text-emerald-600 cursor-pointer"
+                />
+                <span className={step.is_done ? 'line-through text-gray-400' : 'text-gray-700'}>
+                  {step.title}
+                </span>
+              </label>
+              <button
+                onClick={() => onDeleteStep(step.id)}
+                className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 px-1 transition"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+
+          {isExpanded && (
+            <form onSubmit={onAddStep} className="flex gap-1.5 pt-1">
+              <input
+                type="text"
+                placeholder="Break down next micro-step..."
+                value={newStepTitle}
+                onChange={(e) => setNewStepTitle(e.target.value)}
+                className="flex-1 text-xs px-2.5 py-1 border rounded bg-white focus:outline-none focus:border-slate-400"
+              />
+              <button
+                type="submit"
+                className="text-xs font-semibold px-2.5 py-1 bg-slate-800 text-white rounded hover:bg-slate-900"
+              >
+                Add
+              </button>
+            </form>
+          )}
+        </div>
+      )}
     </li>
   );
 };

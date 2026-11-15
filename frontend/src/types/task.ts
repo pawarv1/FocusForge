@@ -1,15 +1,39 @@
-export type Priority = 'LOW' | 'MEDIUM' | 'HIGH';
-export type Category = 'COURSEWORK' | 'RESEARCH' | 'DEVELOPMENT' | 'CAREER' | 'OTHER';
+export type Priority = 'UNASSIGNED' | 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface MicroStep {
+  id: number;
+  google_task_id: string;
+  title: string;
+  is_done: boolean;
+  position: number;
+}
 
 export interface Task {
-  id: number;
+  // Sourced from Google Tasks API
+  google_task_id: string;
+  google_list_id: string;
+  category: string;
   title: string;
-  description?: string | null;
-  priority: Priority;
-  category: Category;
-  is_top3: boolean;
-  is_completed: boolean;
-  is_archived: boolean;
+  notes?: string | null;
   due_date?: string | null;
-  created_at: string;
+  is_completed: boolean;
+
+  // Sourced from local TaskEnrichmentModel
+  priority: Priority;
+  previous_priority?: Priority | null;
+  is_top3: boolean;
+  estimated_minutes?: number | null;
+  assigned_block_start?: string | null;
+  steps: MicroStep[];
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  startIso: string;
+  startTime: string;
+  endTime: string;
+  startHour: number;
+  durationHours: number;
+  isFocusBlock: boolean;
 }

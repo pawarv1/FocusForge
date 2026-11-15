@@ -2,11 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { api } from './api/client';
 import { Navbar, type NavTab } from './components/Navbar';
 import { TaskListView } from './components/TaskListView';
-import { CalendarView } from './components/CalendarView';
 import { RemindersView } from './components/RemindersView';
 import { JournalView } from './components/JournalView';
 import { AnalyticsView } from './components/AnalyticsView';
-import type { Task, Priority, Category } from './types/task';
+import type { Task, Priority } from './types/task';
+
+const DYNAMIC_BADGE_PALETTE = [
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-amber-100 text-amber-800 border-amber-200',
+  'bg-rose-100 text-rose-700 border-rose-200',
+  'bg-cyan-100 text-cyan-800 border-cyan-200',
+];
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>('tasks');
@@ -25,12 +33,14 @@ export const App: React.FC = () => {
     fetchTasks();
   }, [activeTab]);
 
-  const handleToggleComplete = async (id: number) => {
+  const handleToggleComplete = async (googleTaskId: string, googleListId: string) => {
     try {
-      const res = await api.patch<Task>(`/tasks/${id}/complete`);
-      setTasks((prev) => prev.map((t) => (t.id === id ? res.data : t)));
+      await api.patch(`/tasks/${googleTaskId}/complete`, null, {
+        params: { google_list_id: googleListId },
+      });
+      setTasks((prev) => prev.filter((t) => t.google_task_id !== googleTaskId));
     } catch (err) {
-      console.error('Failed to toggle completion:', err);
+      console.error('Failed to complete task:', err);
     }
   };
 
@@ -42,11 +52,15 @@ export const App: React.FC = () => {
         return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'LOW':
         return 'bg-gray-100 text-gray-600 border-gray-200';
+      case 'UNASSIGNED':
+      default:
+        return 'bg-amber-50 text-amber-700 border-dashed border-amber-300';
     }
   };
 
-  const getCategoryBadge = (c: Category) => {
-    switch (c) {
+  const getCategoryBadge = (categoryName: string) => {
+    const normalized = categoryName.trim().toUpperCase();
+    switch (normalized) {
       case 'RESEARCH':
         return 'bg-purple-100 text-purple-700 border-purple-200';
       case 'COURSEWORK':
@@ -55,8 +69,13 @@ export const App: React.FC = () => {
         return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'CAREER':
         return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'OTHER':
-        return 'bg-gray-100 text-gray-700 border-gray-200';
+      default: {
+        let hash = 0;
+        for (let i = 0; i < normalized.length; i++) {
+          hash = normalized.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        return DYNAMIC_BADGE_PALETTE[Math.abs(hash) % DYNAMIC_BADGE_PALETTE.length];
+      }
     }
   };
 
@@ -72,7 +91,6 @@ export const App: React.FC = () => {
       {/* Main Container */}
       <main className="max-w-4xl mx-auto p-6">
         {activeTab === 'tasks' && <TaskListView />}
-        {activeTab === 'calendar' && <CalendarView />}
         {activeTab === 'reminders' && (
           <RemindersView
             tasks={tasks}

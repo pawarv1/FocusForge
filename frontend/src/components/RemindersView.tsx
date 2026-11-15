@@ -1,10 +1,10 @@
 import React from 'react';
-import type { Task, Priority, Category } from '../types/task';
+import type { Task, Priority } from '../types/task';
 
 interface RemindersViewProps {
   tasks: Task[];
-  onToggleComplete: (id: number) => void;
-  getCategoryBadge: (c: Category) => string;
+  onToggleComplete: (googleTaskId: string, googleListId: string) => void;
+  getCategoryBadge: (c: string) => string;
   getPriorityBadge: (p: Priority) => string;
 }
 
@@ -56,7 +56,7 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
 
       {scheduledTasks.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 border border-dashed rounded-xl text-gray-400 text-sm">
-          No upcoming deadlines scheduled. Add a due date to tasks in your workspace to track hard deadlines here!
+          No upcoming deadlines scheduled. Add a due date in Google Tasks to track hard deadlines here!
         </div>
       ) : (
         <div className="space-y-3">
@@ -67,7 +67,7 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
 
             return (
               <div
-                key={task.id}
+                key={task.google_task_id}
                 className={`p-4 rounded-xl border transition shadow-sm space-y-2 ${
                   overdue
                     ? 'bg-red-50/80 border-red-300'
@@ -81,7 +81,9 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
                     <input
                       type="checkbox"
                       checked={task.is_completed}
-                      onChange={() => onToggleComplete(task.id)}
+                      onChange={() =>
+                        onToggleComplete(task.google_task_id, task.google_list_id)
+                      }
                       className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
                     />
                     <span className="font-bold text-sm text-slate-900">
@@ -105,9 +107,9 @@ export const RemindersView: React.FC<RemindersViewProps> = ({
                   )}
                 </div>
 
-                {task.description && (
+                {task.notes && (
                   <p className="text-xs text-slate-600 pl-6">
-                    {task.description}
+                    {task.notes}
                   </p>
                 )}
 

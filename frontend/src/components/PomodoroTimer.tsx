@@ -11,7 +11,7 @@ export interface PomodoroTimerRef {
 
 interface PomodoroTimerProps {
   activeTask?: Task | null;
-  onCompleteTask?: (taskId: number) => void;
+  onCompleteTask?: (googleTaskId: string) => void;
   onClearActiveTask?: () => void;
 }
 
@@ -88,7 +88,9 @@ export const PomodoroTimer = forwardRef<PomodoroTimerRef, PomodoroTimerProps>(
       try {
         const response = await api.post('/sessions', {
           duration_minutes: 25,
-          task_id: activeTask ? activeTask.id : null,
+          google_task_id: activeTask ? activeTask.google_task_id : null,
+          task_title: activeTask ? activeTask.title : null,
+          category_name: activeTask ? activeTask.category : null,
           notes: null,
         });
 
