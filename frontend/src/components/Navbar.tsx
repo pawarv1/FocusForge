@@ -81,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="max-w-4xl mx-auto flex items-center justify-end gap-4 text-[10px] text-slate-400 font-mono">
           <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Space</kbd> Start/Pause Timer</span>
           <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Cmd/Ctrl+Enter</kbd> Save Step / Note</span>
-          <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Esc</kbd> Close Drawer</span>
+          <span><kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Esc</kbd> Cancel / Close</span>
         </div>
       </div>
     </header>

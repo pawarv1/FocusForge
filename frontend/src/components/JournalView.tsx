@@ -1,39 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../api/client';
-
-type TaskCategory = 'COURSEWORK' | 'RESEARCH' | 'DEVELOPMENT' | 'CAREER' | 'OTHER';
 
 interface JournalEntry {
   id: number;
   task_title?: string | null;
-  task_category?: TaskCategory | string | null;
+  task_category?: string | null;
   duration_minutes: number;
   completed_at: string;
   notes: string;
 }
 
-const TASK_CATEGORY_STYLES: Record<TaskCategory, { label: string; classes: string }> = {
-  COURSEWORK: {
-    label: 'Coursework',
-    classes: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  },
-  RESEARCH: {
-    label: 'Research',
-    classes: 'bg-purple-50 text-purple-700 border-purple-200',
-  },
-  DEVELOPMENT: {
-    label: 'Development',
-    classes: 'bg-blue-50 text-blue-700 border-blue-200',
-  },
-  CAREER: {
-    label: 'Career',
-    classes: 'bg-rose-50 text-rose-700 border-rose-200',
-  },
-  OTHER: {
-    label: 'Other',
-    classes: 'bg-slate-100 text-slate-700 border-slate-200',
-  },
+const KNOWN_CATEGORY_STYLES: Record<string, string> = {
+  COURSEWORK: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  RESEARCH: 'bg-purple-50 text-purple-700 border-purple-200',
+  DEVELOPMENT: 'bg-blue-50 text-blue-700 border-blue-200',
+  CAREER: 'bg-rose-50 text-rose-700 border-rose-200',
 };
+
+const DYNAMIC_BADGE_PALETTE = [
+  'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'bg-purple-50 text-purple-700 border-purple-200',
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-amber-50 text-amber-800 border-amber-200',
+  'bg-rose-50 text-rose-700 border-rose-200',
+  'bg-cyan-50 text-cyan-800 border-cyan-200',
+];
 
 export const JournalView: React.FC = () => {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -56,20 +47,37 @@ export const JournalView: React.FC = () => {
     fetchJournal();
   }, []);
 
+  const availableCategories = useMemo(() => {
+    const unique = Array.from(
+      new Set(
+        entries
+          .map((e) => e.task_category?.trim())
+          .filter((c): c is string => Boolean(c))
+      )
+    );
+    return unique;
+  }, [entries]);
+
   const getCategoryMeta = (category?: string | null) => {
     if (!category) return null;
-    const key = category.toUpperCase() as TaskCategory;
-    return (
-      TASK_CATEGORY_STYLES[key] ?? {
-        label: category,
-        classes: 'bg-slate-100 text-slate-700 border-slate-200',
-      }
-    );
+    const key = category.trim().toUpperCase();
+    if (KNOWN_CATEGORY_STYLES[key]) {
+      return { label: category, classes: KNOWN_CATEGORY_STYLES[key] };
+    }
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) {
+      hash = key.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return {
+      label: category,
+      classes: DYNAMIC_BADGE_PALETTE[Math.abs(hash) % DYNAMIC_BADGE_PALETTE.length],
+    };
   };
 
   const filteredEntries = entries.filter((e) => {
     const matchesCategory =
-      selectedCategory === 'ALL' || e.task_category?.toUpperCase() === selectedCategory;
+      selectedCategory === 'ALL' ||
+      e.task_category?.trim().toUpperCase() === selectedCategory.toUpperCase();
 
     const query = search.toLowerCase();
     const matchesQuery =
@@ -98,7 +106,7 @@ export const JournalView: React.FC = () => {
         />
       </div>
 
-      {/* Category Filter Pills */}
+      {/* Dynamic Category Filter Pills */}
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
@@ -111,9 +119,8 @@ export const JournalView: React.FC = () => {
         >
           All
         </button>
-        {(Object.keys(TASK_CATEGORY_STYLES) as TaskCategory[]).map((cat) => {
-          const meta = TASK_CATEGORY_STYLES[cat];
-          const isActive = selectedCategory === cat;
+        {availableCategories.map((cat) => {
+          const isActive = selectedCategory.toUpperCase() === cat.toUpperCase();
           return (
             <button
               key={cat}
@@ -125,7 +132,7 @@ export const JournalView: React.FC = () => {
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {meta.label}
+              {cat}
             </button>
           );
         })}

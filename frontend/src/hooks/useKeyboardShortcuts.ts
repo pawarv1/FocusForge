@@ -19,7 +19,7 @@ export const useKeyboardShortcuts = ({
         activeElement instanceof HTMLTextAreaElement ||
         activeElement instanceof HTMLSelectElement;
 
-      // Escape key (Closes modals)
+      // Escape key (Closes / Cancels active inline inputs or modals)
       if (e.key === 'Escape') {
         if (onEscape) {
           e.preventDefault();

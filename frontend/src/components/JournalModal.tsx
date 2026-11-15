@@ -25,6 +25,19 @@ export const JournalModal: React.FC<JournalModalProps> = ({
     if (isOpen) setNotes('');
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        onSkip();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSubmitting, onSkip]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
